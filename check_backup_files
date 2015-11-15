@@ -1,0 +1,141 @@
+#! /bin/sh
+#
+# Local backup file freshness check plugin for Nagios
+
+PROGPATH=`dirname $0`
+
+. $PROGPATH/utils.sh
+
+print_usage() {
+    echo "
+Usage: check_backup --dirs | -d <directory> [-a <age to search>] [-n <number of files>]
+Usage: check_newest_file_age --help | -h
+
+Description:
+
+This plugin looks for number of files with age less than specified. If number of 
+files is less than threshold - critical message is returned.
+
+The following arguments are accepted:
+
+  --dir | -d      Directory to look in
+
+  -a              Age of files to look for in minutes, default 1800 (30 hours)
+
+  -n              Minimum number of files we should expect to find (default 1)
+
+  --help | -h     Print this help and exit.
+
+"
+}
+
+print_help() {
+    print_usage
+    echo "Backup freshness check for Nagios."
+    echo ""
+}
+
+# Sets the exit status for the plugin.  This is done in such a way that the
+# status can only go in one direction: OK -> WARNING -> CRITICAL.
+set_exit_status() {
+  new_status=$1
+  # Nothing needs to be done if the state is already critical, so exclude
+  # that case.
+  case $exitstatus
+  in
+    $STATE_WARNING)
+      # Only upgrade from warning to critical.
+      if [ "$new_status" = "$STATE_CRITICAL" ]; then
+        exitstatus=$new_status;
+      fi
+    ;;
+    $STATE_OK)
+      # Always update state if current state is OK.
+      exitstatus=$new_status;
+    ;;
+  esac
+}
+
+# Make sure the correct number of command line
+# arguments have been supplied
+if [ $# -lt 1 ]; then
+    print_usage
+    exit $STATE_UNKNOWN
+fi
+
+# Defaults.
+exitstatus=$STATE_OK
+find_mmin=1800
+number_of_files=1
+on_empty=$STATE_OK
+check_dir=
+
+# Grab the command line arguments.
+while test -n "$1"; do
+    case "$1" in
+        --help)
+            print_help
+            exit $STATE_OK
+            ;;
+        -h)
+            print_help
+            exit $STATE_OK
+            ;;
+        --dirs)
+            check_dir=$2
+            shift
+            ;;
+        -d)
+            check_dir=$2
+            shift
+            ;;
+        -a)
+            find_mmin=$2
+            shift
+            ;;
+        -n)
+            number_of_files=$2
+            shift
+            ;;
+        *)
+            echo "Unknown argument: $1"
+            print_usage
+            exit $STATE_UNKNOWN
+            ;;
+    esac
+    shift
+done
+
+if [ ! "$check_dir" ]; then
+  echo "No directory provided."
+  exit $STATE_UNKNOWN
+fi
+
+if [ `echo "$find_mmin" | grep [^0-9]` ] || [ ! "$find_mmin" ]; then
+  echo "File age must be a number."
+  exit $STATE_UNKNOWN
+fi
+
+if [ `echo "$number_of_files" | grep [^0-9]` ] || [ ! "$number_of_files" ]; then
+  echo "Number of files must be a number."
+  exit $STATE_UNKNOWN
+fi
+
+if [ ! -d "$check_dir" ]; then
+    echo "$check_dir does not exist"
+    exit $STATE_UNKNOWN
+fi
+
+find_files=`find "$check_dir" -mmin -$find_mmin | wc -l`
+if [ $? -ne 0 ]; then
+    echo "Error running find"
+    exit $STATE_UNKNOWN
+fi
+
+if [ "$find_files" -lt "$number_of_files" ]; then
+    echo "CRITICAL: Found $find_files (expected: $number_of_files)"
+    exit $STATE_CRITICAL
+else
+    echo "OK: Found $find_files fresh files"
+    exit $STATE_OK
+fi
